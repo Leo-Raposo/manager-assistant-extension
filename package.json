@@ -1,0 +1,212 @@
+{
+  "name": "manager-assistant",
+  "displayName": "Manager Assistant",
+  "description": "Gerador de links formatados para relatórios no Manager",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "manager-assistant-sidebar",
+          "title": "Manager Assistant",
+          "icon": "resources/manager-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "manager-assistant-sidebar": [
+        {
+          "id": "managerAssistantExplorer",
+          "name": "Artefatos do Manager",
+          "icon": "$(file-code)"
+        },
+        {
+          "id": "managerAssistantHistory",
+          "name": "Histórico de Relatórios",
+          "icon": "$(history)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "managerAssistantExplorer",
+        "contents": "Nenhum commit capturado. \n[Capturar último commit](command:manager-assistant.captureLastCommit) ou [Capturar staged](command:manager-assistant.captureStagedChanges)."
+      },
+      {
+        "view": "managerAssistantHistory",
+        "contents": "Nenhum histórico disponível."
+      }
+    ],
+    "commands": [
+      {
+        "command": "manager-assistant.refreshCommits",
+        "title": "Atualizar commits",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "manager-assistant.captureLastCommit",
+        "title": "Capturar último commit",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "manager-assistant.captureStagedChanges",
+        "title": "Capturar alterações staged",
+        "icon": "$(git-stage)"
+      },
+      {
+        "command": "manager-assistant.sendToManager",
+        "title": "Enviar para o Manager",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "manager-assistant.editArtifact",
+        "title": "Editar artefato",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "manager-assistant.copyArtifact",
+        "title": "Copiar artefato",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "manager-assistant.removeArtifact",
+        "title": "Remover artefato",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "manager-assistant.saveReport",
+        "title": "Salvar relatório",
+        "icon": "$(save)"
+      },
+      {
+        "command": "manager-assistant.loadReport",
+        "title": "Carregar relatório",
+        "icon": "$(folder-opened)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "manager-assistant.refreshCommits",
+          "when": "view == managerAssistantExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "manager-assistant.captureLastCommit",
+          "when": "view == managerAssistantExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "manager-assistant.captureStagedChanges",
+          "when": "view == managerAssistantExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "manager-assistant.saveReport",
+          "when": "view == managerAssistantExplorer",
+          "group": "9_cutcopypaste"
+        },
+        {
+          "command": "manager-assistant.loadReport",
+          "when": "view == managerAssistantHistory",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "manager-assistant.sendToManager",
+          "when": "view == managerAssistantExplorer && viewItem == artifact",
+          "group": "inline"
+        },
+        {
+          "command": "manager-assistant.editArtifact",
+          "when": "view == managerAssistantExplorer && viewItem == artifact",
+          "group": "inline"
+        },
+        {
+          "command": "manager-assistant.copyArtifact",
+          "when": "view == managerAssistantExplorer && viewItem == artifact",
+          "group": "inline"
+        },
+        {
+          "command": "manager-assistant.removeArtifact",
+          "when": "view == managerAssistantExplorer && viewItem == artifact",
+          "group": "inline"
+        }
+      ],
+      "scm/title": [
+        {
+          "when": "scmProvider == git",
+          "command": "manager-assistant.captureLastCommit",
+          "group": "navigation"
+        },
+        {
+          "when": "scmProvider == git",
+          "command": "manager-assistant.captureStagedChanges",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Manager Assistant",
+      "properties": {
+        "managerAssistant.apiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "URL da API do Manager para integração direta (opcional)"
+        },
+        "managerAssistant.defaultComplexity": {
+          "type": "string",
+          "default": "Média",
+          "enum": [
+            "Baixa",
+            "Média",
+            "Alta",
+            "N/A"
+          ],
+          "description": "Complexidade padrão para novos arquivos"
+        },
+        "managerAssistant.autoDetectFileType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Detectar automaticamente o tipo de arquivo"
+        },
+        "managerAssistant.reportHistoryLimit": {
+          "type": "number",
+          "default": 10,
+          "description": "Número máximo de relatórios a manter no histórico"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "node build.js",
+    "watch": "tsc -watch -p ./",
+    "package": "node build.js",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.1",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/test-electron": "^2.3.2",
+    "esbuild": "^0.17.15",
+    "eslint": "^8.43.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.1.3"
+  }
+}

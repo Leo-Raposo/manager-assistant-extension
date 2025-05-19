@@ -2,10 +2,14 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { FilterPanel } from './FilterPanel';
+import { ArtifactsWebviewProvider } from './ArtifactsWebviewProvider';
+import { CommitsProvider } from './CommitsProvider';
+import { HistoryProvider } from './HistoryProvider';
 
-const execPromise = promisify(exec);
+import * as simplegit from 'simple-git';
+type SimpleGit = simplegit.SimpleGit;
+const simpleGit = simplegit.simpleGit;
 
 // Interfaces
 interface Artifact {
@@ -13,6 +17,8 @@ interface Artifact {
 	type: string;
 	changeType: ChangeType;
 	complexity: Complexity;
+	author?: string;
+	taskId?: string;
 }
 
 interface Report {
@@ -49,10 +55,17 @@ class ArtifactItem extends vscode.TreeItem {
 		public readonly artifact: Artifact,
 		public readonly commitHash: string
 	) {
-		super(artifact.path);
+		// Adiciona o símbolo '+' na frente do path para artefatos novos
+		const displayName = artifact.changeType === ChangeType.New
+			? `+ ${artifact.path}`
+			: artifact.path;
+
+		super(displayName);
 
 		this.description = artifact.type;
-		this.tooltip = `${artifact.path}#${commitHash}\nTipo: ${artifact.type}\nAlteração: ${artifact.changeType}\nComplexidade: ${artifact.complexity}`;
+		this.tooltip = `${artifact.path}#${commitHash}\nTipo: ${artifact.type}\nAlteração: ${artifact.changeType}\nComplexidade: ${artifact.complexity}` +
+			(artifact.author ? `\nAutor: ${artifact.author}` : '') +
+			(artifact.taskId ? `\nTarefa: ${artifact.taskId}` : '');
 		this.contextValue = 'artifact';
 
 		// Ícone baseado no tipo de alteração
@@ -86,6 +99,35 @@ class ReportItem extends vscode.TreeItem {
 	}
 }
 
+// Classe para representar um commit do Git
+class CommitItem extends vscode.TreeItem {
+	constructor(
+		public readonly id: string,
+		public readonly message: string,
+		public readonly date: Date,
+		public readonly author: string,
+		public readonly taskId?: string
+	) {
+		// Se tiver taskId, destaque no início da mensagem
+		const displayMessage = taskId ? `[${taskId}] ${message}` : message;
+		super(displayMessage);
+
+		this.description = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+		this.tooltip = `ID: ${id}\nAutor: ${author}\nData: ${date.toLocaleString()}\nMensagem: ${message}` +
+			(taskId ? `\nTarefa: ${taskId}` : '');
+		this.contextValue = 'commit';
+		this.iconPath = new vscode.ThemeIcon('git-commit');
+		this.collapsibleState = vscode.TreeItemCollapsibleState.None;
+
+		// Adicionar comando ao clicar no item
+		this.command = {
+			command: 'manager-assistant.loadCommitArtifacts',
+			title: 'Carregar Artefatos',
+			arguments: [this]
+		};
+	}
+}
+
 // Classe para o TreeDataProvider dos Artefatos
 class ArtifactsProvider implements vscode.TreeDataProvider<ArtifactItem> {
 	private _onDidChangeTreeData: vscode.EventEmitter<ArtifactItem | undefined | null | void> = new vscode.EventEmitter<ArtifactItem | undefined | null | void>();
@@ -96,6 +138,7 @@ class ArtifactsProvider implements vscode.TreeDataProvider<ArtifactItem> {
 	private statusBarItem: vscode.StatusBarItem;
 
 	constructor() {
+		// Cria apenas a barra de status principal
 		this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 		this.statusBarItem.text = "$(git-commit) Manager Assistant";
 		this.statusBarItem.command = "manager-assistant.captureLastCommit";
@@ -153,97 +196,40 @@ class ArtifactsProvider implements vscode.TreeDataProvider<ArtifactItem> {
 		return this._commitHash;
 	}
 
-	dispose(): void {
-		this.statusBarItem.dispose();
-	}
-}
+	// Método para filtrar artefatos
+	filterArtifacts(taskId?: string, author?: string): void {
+		const currentArtifacts = [...this._artifacts];
+		let filteredArtifacts = currentArtifacts;
 
-// Classe para o TreeDataProvider do Histórico
-class HistoryProvider implements vscode.TreeDataProvider<ReportItem> {
-	private _onDidChangeTreeData: vscode.EventEmitter<ReportItem | undefined | null | void> = new vscode.EventEmitter<ReportItem | undefined | null | void>();
-	readonly onDidChangeTreeData: vscode.Event<ReportItem | undefined | null | void> = this._onDidChangeTreeData.event;
-
-	private history: HistoryReport[] = [];
-
-	constructor() {
-		// Carrega o histórico salvo
-		this.loadHistory();
-	}
-
-	loadHistory(): void {
-		const storageFile = path.join(getStoragePath(), 'report-history.json');
-
-		if (fs.existsSync(storageFile)) {
-			try {
-				this.history = JSON.parse(fs.readFileSync(storageFile, 'utf8'));
-				this._onDidChangeTreeData.fire();
-			} catch (error) {
-				console.error('Erro ao carregar histórico:', error);
-				this.history = [];
-			}
-		}
-	}
-
-	saveHistory(): void {
-		const storageFile = path.join(getStoragePath(), 'report-history.json');
-		const storageDir = path.dirname(storageFile);
-
-		// Garante que o diretório existe
-		if (!fs.existsSync(storageDir)) {
-			fs.mkdirSync(storageDir, { recursive: true });
+		// Filtrar por taskId se fornecido
+		if (taskId && taskId.trim() !== '') {
+			filteredArtifacts = filteredArtifacts.filter(artifact =>
+				artifact.taskId && artifact.taskId.includes(taskId.trim())
+			);
 		}
 
-		// Limita o histórico ao tamanho configurado
-		const historyLimit = vscode.workspace.getConfiguration('managerAssistant').get('reportHistoryLimit', 10);
-		if (this.history.length > historyLimit) {
-			this.history = this.history.slice(0, historyLimit);
+		// Filtrar por autor se fornecido
+		if (author && author.trim() !== '') {
+			filteredArtifacts = filteredArtifacts.filter(artifact =>
+				artifact.author && artifact.author.toLowerCase().includes(author.trim().toLowerCase())
+			);
 		}
 
-		try {
-			fs.writeFileSync(storageFile, JSON.stringify(this.history, null, 2));
-		} catch (error) {
-			console.error('Erro ao salvar histórico:', error);
-			vscode.window.showErrorMessage('Erro ao salvar histórico: ' + (error as Error).message);
-		}
-	}
-
-	addReport(report: Report): void {
-		const timestamp = new Date().toISOString();
-		const reportName = `Relatório ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-
-		this.history.unshift({
-			id: timestamp,
-			name: reportName,
-			timestamp: timestamp,
-			commitHash: report.commitHash,
-			artifactCount: report.artifacts.length,
-			artifacts: report.artifacts
-		});
-
-		this.saveHistory();
+		// Atualizar a visualização com os artefatos filtrados
+		this._artifacts = filteredArtifacts;
 		this._onDidChangeTreeData.fire();
 	}
 
-	refresh(): void {
-		this.loadHistory();
+	// Método para copiar todos os links
+	copyAllLinks(): string[] {
+		return this._artifacts.map(artifact => {
+			const prefix = artifact.changeType === ChangeType.New ? '+ ' : '';
+			return `${prefix}${artifact.path}#${this._commitHash}`;
+		});
 	}
 
-	getTreeItem(element: ReportItem): vscode.TreeItem {
-		return element;
-	}
-
-	getChildren(element?: ReportItem): Thenable<ReportItem[]> {
-		if (element) {
-			return Promise.resolve([]);
-		}
-
-		if (this.history.length === 0) {
-			return Promise.resolve([]);
-		}
-
-		return Promise.resolve(
-			this.history.map(report => new ReportItem(report))
-		);
+	dispose(): void {
+		this.statusBarItem.dispose();
 	}
 }
 
@@ -288,64 +274,169 @@ function detectComplexity(filePath: string): Complexity {
 	}
 }
 
-function parseGitChanges(gitOutput: string): Artifact[] {
-	if (!gitOutput.trim()) {
-		return [];
+// Usando simple-git para operações Git
+async function parseGitChangesWithSimpleGit(git: SimpleGit, commitHash: string): Promise<Artifact[]> {
+	try {
+		// Obter detalhes do commit
+		const show = await git.show([
+			commitHash,
+			'--name-status',
+			'--pretty=format:%an|%ae'
+		]);
+
+		if (!show) {
+			return [];
+		}
+
+		// Separar o cabeçalho (autor) do conteúdo
+		const lines = show.split('\n');
+		let authorLine = '';
+		let contentStartIndex = 0;
+
+		// Encontrar a linha de autor e o início do conteúdo
+		for (let i = 0; i < lines.length; i++) {
+			if (lines[i].includes('|')) {
+				authorLine = lines[i];
+				contentStartIndex = i + 1;
+				break;
+			}
+		}
+
+		// Extrair autor
+		const authorParts = authorLine.split('|');
+		const author = authorParts.length >= 2
+			? `${authorParts[0]} <${authorParts[1]}>`
+			: authorLine;
+
+		// Extrair identificação BB
+		const bbId = /\bc\d{7}\b/i.exec(author)?.[0];
+
+		// Obter mensagem do commit para extrair taskId
+		const logResult = await git.log(['-n', '1', commitHash]);
+		const commitMessage = logResult.latest?.message || '';
+		const taskId = extractTaskIdFromMessage(commitMessage);
+
+		// Processar arquivos alterados
+		const artifacts: Artifact[] = [];
+
+		for (let i = contentStartIndex; i < lines.length; i++) {
+			const line = lines[i].trim();
+			if (!line) { continue; }
+
+			const parts = line.split(/\s+/);
+			if (parts.length < 2) { continue; }
+
+			const status = parts[0];
+			const filePath = parts.slice(1).join(' '); // Para lidar com espaços no caminho
+
+			let changeType: ChangeType;
+
+			switch (status) {
+				case 'A':
+					changeType = ChangeType.New;
+					break;
+				case 'M':
+					changeType = ChangeType.Update;
+					break;
+				case 'D':
+					changeType = ChangeType.Delete;
+					break;
+				case 'R':
+					changeType = ChangeType.Rename;
+					break;
+				default:
+					changeType = ChangeType.Other;
+			}
+
+			artifacts.push({
+				path: filePath,
+				type: detectFileType(filePath),
+				changeType: changeType,
+				complexity: detectComplexity(filePath),
+				author: author,
+				taskId: taskId
+			});
+		}
+
+		return artifacts;
+	} catch (error) {
+		console.error('Erro ao processar alterações do Git:', error);
+		throw error;
+	}
+}
+
+// Extrai o ID da tarefa da mensagem do commit
+function extractTaskIdFromMessage(message: string): string | undefined {
+	// Padrões comuns para ID de tarefa
+	const patterns = [
+		/\b[Tt][Aa][Ss][Kk][-#](\d+)\b/,
+		/\b[Tt][-#](\d+)\b/,
+		/\b#(\d+)\b/
+	];
+
+	for (const pattern of patterns) {
+		const match = message.match(pattern);
+		if (match && match[1]) {
+			return match[1];
+		}
 	}
 
-	const lines = gitOutput.trim().split('\n');
-	const artifacts: Artifact[] = [];
+	return undefined;
+}
 
-	lines.forEach(line => {
-		if (!line.trim()) {
-			return;
-		}
-
-		const parts = line.trim().split(/\s+/);
-		const status = parts[0];
-		const filePath = parts.slice(1).join(' '); // Para lidar com espaços no caminho
-
-		let changeType: ChangeType;
-
-		switch (status) {
-			case 'A':
-				changeType = ChangeType.New;
-				break;
-			case 'M':
-				changeType = ChangeType.Update;
-				break;
-			case 'D':
-				changeType = ChangeType.Delete;
-				break;
-			case 'R':
-				changeType = ChangeType.Rename;
-				break;
-			default:
-				changeType = ChangeType.Other;
-		}
-
-		artifacts.push({
-			path: filePath,
-			type: detectFileType(filePath),
-			changeType: changeType,
-			complexity: detectComplexity(filePath)
-		});
-	});
-
-	return artifacts;
+// Comando para mostrar a interface de filtros
+async function showFilters(
+	context: vscode.ExtensionContext,
+	historyProvider: HistoryProvider,
+	artifactsProvider: ArtifactsProvider
+): Promise<void> {
+	// Usa o novo painel de filtros em vez de InputBox
+	FilterPanel.createOrShow(context.extensionPath, historyProvider, artifactsProvider);
 }
 
 // Função principal para ativação da extensão
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
 	console.log('Manager Assistant está ativo!');
 
 	// Cria os provedores de dados
 	const artifactsProvider = new ArtifactsProvider();
-	const historyProvider = new HistoryProvider();
+	const historyProvider = new HistoryProvider(artifactsProvider);
+	const commitsProvider = new CommitsProvider(artifactsProvider);
+
+	// Cria e registra o provedor de webview personalizado para os artefatos
+	const artifactsWebviewProvider = new ArtifactsWebviewProvider(
+		context.extensionUri,
+		artifactsProvider,
+		historyProvider
+	);
+
+	// Registra o provedor de webview para a visualização de artefatos
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			ArtifactsWebviewProvider.viewType,
+			artifactsWebviewProvider
+		)
+	);
 
 	// Registra as views
-	vscode.window.registerTreeDataProvider('managerAssistantExplorer', artifactsProvider);
+	vscode.window.registerTreeDataProvider('managerAssistantCommits', commitsProvider);
 	vscode.window.registerTreeDataProvider('managerAssistantHistory', historyProvider);
+
+	// Assinatura para atualizar a webview quando os artefatos mudarem
+	artifactsProvider.onDidChangeTreeData(() => {
+		artifactsWebviewProvider.updateArtifactsList();
+	});
+
+	// Configurar o estado inicial das views (Histórico minimizado)
+	setTimeout(() => {
+		vscode.commands.executeCommand('managerAssistantHistory.collapse');
+	}, 1000);
+
+	// Comando para mostrar filtros
+	let showFiltersCommand = vscode.commands.registerCommand('manager-assistant.showFilters', () => {
+		// Foca na view de artefatos que já tem os filtros integrados
+		vscode.commands.executeCommand('managerAssistantExplorer.focus');
+	});
 
 	// Comando para capturar o último commit
 	let captureLastCommitCommand = vscode.commands.registerCommand('manager-assistant.captureLastCommit', async () => {
@@ -355,6 +446,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const rootPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+			const git = simpleGit(rootPath);
 
 			// Mostra indicador de progresso
 			await vscode.window.withProgress({
@@ -365,16 +457,18 @@ export function activate(context: vscode.ExtensionContext) {
 				progress.report({ message: "Capturando último commit..." });
 
 				// Obtém a hash do último commit
-				const { stdout: commitHash } = await execPromise('git rev-parse HEAD', { cwd: rootPath });
-				const shortHash = commitHash.trim().substring(0, 10);
+				const log = await git.log(['-n', '1']);
+				if (!log.latest) {
+					throw new Error('Não foi possível obter o último commit');
+				}
+
+				const commitHash = log.latest.hash;
+				const shortHash = commitHash.substring(0, 10);
 
 				progress.report({ message: "Analisando arquivos alterados..." });
 
-				// Obtém os arquivos alterados no último commit
-				const { stdout: gitOutput } = await execPromise('git diff-tree --no-commit-id --name-status -r HEAD', { cwd: rootPath });
-
-				// Processa os arquivos
-				const artifacts = parseGitChanges(gitOutput);
+				// Obtém os arquivos alterados usando simple-git
+				const artifacts = await parseGitChangesWithSimpleGit(git, commitHash);
 
 				// Atualiza a view
 				artifactsProvider.refresh(artifacts, shortHash);
@@ -406,6 +500,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 
 			const rootPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+			const git = simpleGit(rootPath);
 
 			await vscode.window.withProgress({
 				location: vscode.ProgressLocation.Notification,
@@ -414,16 +509,88 @@ export function activate(context: vscode.ExtensionContext) {
 			}, async (progress) => {
 				progress.report({ message: "Capturando alterações staged..." });
 
-				// Obtém os arquivos staged
-				const { stdout: gitOutput } = await execPromise('git diff --name-status --staged', { cwd: rootPath });
+				// Obtém os arquivos staged usando simple-git
+				const status = await git.status();
 
-				// Se não houver alterações staged
-				if (!gitOutput.trim()) {
+				// Verifica se há alterações staged
+				if (!status.staged.length) {
 					throw new Error('Não há alterações staged para capturar.');
 				}
 
-				// Processa os arquivos
-				const artifacts = parseGitChanges(gitOutput);
+				// Processa cada arquivo staged
+				const artifacts: Artifact[] = [];
+				const user = await git.raw(['config', 'user.name']);
+				const email = await git.raw(['config', 'user.email']);
+				const author = `${user.trim()} <${email.trim()}>`;
+
+				for (const file of status.staged) {
+					let changeType: ChangeType;
+					let filePath: string;
+
+					// Se for um objeto com propriedades bem definidas
+					if (typeof file === 'object' && file !== null) {
+						// Tentativa 1: acessar como propriedade index
+						if ('index' in file) {
+							const index = (file as any).index;
+							if (index === 'A') {
+								changeType = ChangeType.New;
+							} else if (index === 'M') {
+								changeType = ChangeType.Update;
+							} else if (index === 'D') {
+								changeType = ChangeType.Delete;
+							} else if (index === 'R') {
+								changeType = ChangeType.Rename;
+							} else {
+								changeType = ChangeType.Other;
+							}
+						}
+						// Tentativa 2: acessar primeiro caractere do status
+						else if ('working_dir' in file && typeof (file as any).working_dir === 'string') {
+							const status = (file as any).working_dir;
+							if (status === 'A') {
+								changeType = ChangeType.New;
+							} else if (status === 'M') {
+								changeType = ChangeType.Update;
+							} else if (status === 'D') {
+								changeType = ChangeType.Delete;
+							} else if (status === 'R') {
+								changeType = ChangeType.Rename;
+							} else {
+								changeType = ChangeType.Other;
+							}
+						} else {
+							changeType = ChangeType.Other;
+						}
+
+						// Obter o caminho do arquivo
+						if ('path' in file && typeof (file as any).path === 'string') {
+							filePath = (file as any).path;
+						} else if ('filepath' in file && typeof (file as any).filepath === 'string') {
+							filePath = (file as any).filepath;
+						} else if ('file' in file && typeof (file as any).file === 'string') {
+							filePath = (file as any).file;
+						} else {
+							// Se não conseguir identificar o path, pule este arquivo
+							continue;
+						}
+					}
+					// Se for uma string (formato mais simples)
+					else if (typeof file === 'string') {
+						changeType = ChangeType.Update; // Assumir atualização por padrão
+						filePath = file;
+					} else {
+						// Se não for nem objeto nem string, pule
+						continue;
+					}
+
+					artifacts.push({
+						path: filePath,
+						type: detectFileType(filePath),
+						changeType: changeType,
+						complexity: detectComplexity(filePath),
+						author: author
+					});
+				}
 
 				// Solicita hash (opcional)
 				const inputHash = await vscode.window.showInputBox({
@@ -458,6 +625,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Comando para atualizar commits
 	let refreshCommitsCommand = vscode.commands.registerCommand('manager-assistant.refreshCommits', () => {
 		artifactsProvider.refresh();
+		commitsProvider.refresh();
 		historyProvider.refresh();
 	});
 
@@ -469,7 +637,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const artifact = item.artifact;
-		const formattedPath = `${artifact.path}#${item.commitHash}`;
+		// Adiciona o símbolo + para arquivos novos
+		const prefix = artifact.changeType === ChangeType.New ? '+ ' : '';
+		const formattedPath = `${prefix}${artifact.path}#${item.commitHash}`;
 
 		// Verifica se há um endpoint configurado
 		const apiEndpoint = vscode.workspace.getConfiguration('managerAssistant').get('apiEndpoint', '');
@@ -493,6 +663,46 @@ export function activate(context: vscode.ExtensionContext) {
 			// Se não houver API configurada, copia para a área de transferência
 			vscode.env.clipboard.writeText(formattedPath);
 			vscode.window.showInformationMessage('Link copiado: ' + formattedPath);
+		}
+	});
+
+	// Comando para carregar artefatos de um commit do Git
+	let loadCommitArtifactsCommand = vscode.commands.registerCommand('manager-assistant.loadCommitArtifacts', async (commitItem: any) => {
+		try {
+			if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+				throw new Error('Nenhum workspace aberto. Abra um projeto Git para usar esta extensão.');
+			}
+
+			if (!commitItem || !commitItem.id) {
+				throw new Error('Commit inválido selecionado.');
+			}
+
+			const rootPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+			const git = simpleGit(rootPath);
+
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: "Manager Assistant",
+				cancellable: false
+			}, async (progress) => {
+				progress.report({ message: "Carregando artefatos do commit..." });
+
+				// Obter os arquivos alterados no commit usando simple-git
+				const artifacts = await parseGitChangesWithSimpleGit(git, commitItem.id);
+
+				// Atualiza a view
+				artifactsProvider.refresh(artifacts, commitItem.id.substring(0, 10));
+
+				progress.report({ message: `Encontrados ${artifacts.length} artefatos` });
+
+				return new Promise(resolve => setTimeout(resolve, 1000));
+			});
+
+			// Foca na view de artefatos
+			vscode.commands.executeCommand('managerAssistantExplorer.focus');
+
+		} catch (error) {
+			vscode.window.showErrorMessage('Erro ao carregar artefatos do commit: ' + (error as Error).message);
 		}
 	});
 
@@ -529,10 +739,28 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const artifact = item.artifact;
-		const formattedPath = `${artifact.path}#${item.commitHash}`;
+		// Adiciona o símbolo + para arquivos novos
+		const prefix = artifact.changeType === ChangeType.New ? '+ ' : '';
+		const formattedPath = `${prefix}${artifact.path}#${item.commitHash}`;
 
 		vscode.env.clipboard.writeText(formattedPath);
 		vscode.window.showInformationMessage('Link copiado: ' + formattedPath);
+	});
+
+	// Comando para copiar todos os artefatos
+	let copyAllArtifactsCommand = vscode.commands.registerCommand('manager-assistant.copyAllArtifacts', () => {
+		const links = artifactsProvider.copyAllLinks();
+
+		if (links.length === 0) {
+			vscode.window.showErrorMessage('Não há artefatos para copiar.');
+			return;
+		}
+
+		// Junta todos os links com quebras de linha
+		const allLinks = links.join('\n');
+
+		vscode.env.clipboard.writeText(allLinks);
+		vscode.window.showInformationMessage(`${links.length} links copiados para a área de transferência`);
 	});
 
 	// Comando para remover artefato
@@ -581,7 +809,7 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	// Comando para carregar relatório
-	let loadReportCommand = vscode.commands.registerCommand('manager-assistant.loadReport', async (item?: ReportItem) => {
+	let loadReportCommand = vscode.commands.registerCommand('manager-assistant.loadReport', async (item?: any) => {
 		// Se foi chamado a partir de um item do histórico
 		if (item && item.report) {
 			artifactsProvider.refresh(item.report.artifacts, item.report.commitHash);
@@ -615,17 +843,27 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
+	// Atualiza o package.json para adicionar o novo comando para copiar todos os artefatos
+	const packageJsonCommand = {
+		command: 'manager-assistant.copyAllArtifacts',
+		title: 'Copiar todos os artefatos',
+		icon: '$(copy)'
+	};
+
 	// Registra todos os comandos no contexto da extensão
 	context.subscriptions.push(
 		captureLastCommitCommand,
 		captureStagedChangesCommand,
 		refreshCommitsCommand,
 		sendToManagerCommand,
+		loadCommitArtifactsCommand,
 		editArtifactCommand,
 		copyArtifactCommand,
+		copyAllArtifactsCommand,
 		removeArtifactCommand,
 		saveReportCommand,
-		loadReportCommand
+		loadReportCommand,
+		showFiltersCommand
 	);
 
 	// Registra a disposição da barra de status

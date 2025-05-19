@@ -1,71 +1,72 @@
-# manager-assistant README
+# Manager Assistant - Extensão para VSCode
 
-This is the README for your extension "manager-assistant". After writing up a brief description, we recommend including the following sections.
+## Descrição
+O Manager Assistant é uma extensão para VSCode que facilita a geração de links formatados para relatórios no Manager, utilizado pelo BBTS para rastreamento de trabalho em projetos.
 
-## Features
+## Recursos Principais
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+### Captura de Commits
+- **Capturar Último Commit**: Analisa o último commit e extrai todos os arquivos alterados
+- **Capturar Alterações Staged**: Analisa arquivos em staging e os prepara para relatório
+- **Extração de Tarefa**: Identifica automaticamente o número da tarefa a partir da mensagem do commit
 
-For example if there is an image subfolder under your extension project workspace:
+### Filtragem de Artefatos
+- **Filtro por Autor**: Identifica e filtra contribuições por identificação de desenvolvedor
+- **Filtro por Tarefa**: Filtra commits e artefatos por número de tarefa
+- **Filtros Persistentes**: Mantém as configurações de filtro entre sessões
 
-\!\[feature X\]\(images/feature-x.png\)
+### Visualização
+- **Artefatos do Manager**: Visualiza todos os artefatos capturados com informações detalhadas
+- **Commits Git**: Navegação por commits recentes com opção de carregar artefatos
+- **Histórico de Relatórios**: Acesso a relatórios salvos anteriormente
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+### Operações
+- **Copiar Links**: Copia links individuais ou múltiplos para relatórios
+- **Editar Complexidade**: Ajusta a complexidade dos artefatos para pontuação no BBTS
+- **Salvar Relatórios**: Armazena relatórios para uso posterior
 
-## Requirements
+## Organização da Interface
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+A extensão possui três visualizações principais:
 
-## Extension Settings
+1. **Artefatos do Manager**: Mostra os artefatos atualmente carregados com seus detalhes
+2. **Commits Git**: Lista os commits mais recentes do repositório
+3. **Histórico de Relatórios**: Mostra os relatórios salvos anteriormente
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+## Como Usar
 
-For example:
+### Capturando Artefatos
+1. Clique em "Capturar último commit" para carregar os artefatos do último commit
+2. Ou clique em "Capturar alterações staged" para carregar arquivos em staging
 
-This extension contributes the following settings:
+### Filtrando
+1. Na view "Artefatos do Manager", preencha os campos de filtro:
+   - "Identificação do Autor" para filtrar por desenvolvedor
+   - "Número da Tarefa" para filtrar por tarefa específica
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+### Copiando Links
+1. Passe o mouse sobre um artefato para ver o botão de cópia
+2. Clique no botão "Copiar Todos" para copiar todos os links de uma vez
 
-## Known Issues
+### Navegando por Commits
+1. Use a view "Commits Git" para ver commits recentes
+2. Clique em um commit para carregar seus artefatos
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+## Requisitos
+- VS Code 1.80.0 ou superior
+- Git instalado e configurado no workspace
 
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+## Extensão Desenvolvida para
+Banco do Brasil Tecnologia e Serviços (BBTS)
 
 ---
 
-## Following extension guidelines
+### Configurações
 
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
+Esta extensão contribui com as seguintes configurações:
 
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+* `managerAssistant.apiEndpoint`: URL da API do Manager para integração direta
+* `managerAssistant.defaultComplexity`: Complexidade padrão para novos arquivos
+* `managerAssistant.reportHistoryLimit`: Número máximo de relatórios a manter no histórico
+* `managerAssistant.defaultAuthor`: Identificação padrão do autor
+* `managerAssistant.defaultTaskFormat`: Formato padrão para reconhecimento de tarefas

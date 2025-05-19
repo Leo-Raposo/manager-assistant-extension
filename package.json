@@ -3,15 +3,19 @@
   "displayName": "Manager Assistant",
   "description": "Gerador de links formatados para relatórios no Manager",
   "version": "0.1.0",
+  "publisher": "bbts",
+  "icon": "resources/logo-bb.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bbts/manager-assistant"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "*"
-  ],
+  "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -19,7 +23,7 @@
         {
           "id": "manager-assistant-sidebar",
           "title": "Manager Assistant",
-          "icon": "resources/manager-icon.svg"
+          "icon": "resources/logo-bb.png"
         }
       ]
     },
@@ -28,7 +32,13 @@
         {
           "id": "managerAssistantExplorer",
           "name": "Artefatos do Manager",
+          "type": "webview",
           "icon": "$(file-code)"
+        },
+        {
+          "id": "managerAssistantCommits",
+          "name": "Commits Git",
+          "icon": "$(git-commit)"
         },
         {
           "id": "managerAssistantHistory",
@@ -39,8 +49,8 @@
     },
     "viewsWelcome": [
       {
-        "view": "managerAssistantExplorer",
-        "contents": "Nenhum commit capturado. \n[Capturar último commit](command:manager-assistant.captureLastCommit) ou [Capturar staged](command:manager-assistant.captureStagedChanges)."
+        "view": "managerAssistantCommits",
+        "contents": "Nenhum commit disponível."
       },
       {
         "view": "managerAssistantHistory",
@@ -56,6 +66,11 @@
       {
         "command": "manager-assistant.captureLastCommit",
         "title": "Capturar último commit",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "manager-assistant.loadCommitArtifacts",
+        "title": "Carregar artefatos do commit",
         "icon": "$(git-commit)"
       },
       {
@@ -79,6 +94,11 @@
         "icon": "$(copy)"
       },
       {
+        "command": "manager-assistant.copyAllArtifacts",
+        "title": "Copiar todos os artefatos",
+        "icon": "$(copy-all)"
+      },
+      {
         "command": "manager-assistant.removeArtifact",
         "title": "Remover artefato",
         "icon": "$(trash)"
@@ -92,28 +112,38 @@
         "command": "manager-assistant.loadReport",
         "title": "Carregar relatório",
         "icon": "$(folder-opened)"
+      },
+      {
+        "command": "manager-assistant.showFilters",
+        "title": "Filtrar commits",
+        "icon": "$(filter)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "manager-assistant.refreshCommits",
-          "when": "view == managerAssistantExplorer",
+          "when": "view == managerAssistantCommits",
           "group": "navigation"
         },
         {
           "command": "manager-assistant.captureLastCommit",
-          "when": "view == managerAssistantExplorer",
+          "when": "view == managerAssistantCommits",
           "group": "navigation"
         },
         {
           "command": "manager-assistant.captureStagedChanges",
-          "when": "view == managerAssistantExplorer",
+          "when": "view == managerAssistantCommits",
+          "group": "navigation"
+        },
+        {
+          "command": "manager-assistant.refreshCommits",
+          "when": "view == managerAssistantHistory",
           "group": "navigation"
         },
         {
           "command": "manager-assistant.saveReport",
-          "when": "view == managerAssistantExplorer",
+          "when": "view == managerAssistantHistory",
           "group": "9_cutcopypaste"
         },
         {
@@ -123,6 +153,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "manager-assistant.loadCommitArtifacts",
+          "when": "view == managerAssistantCommits && viewItem == commit",
+          "group": "inline"
+        },
         {
           "command": "manager-assistant.sendToManager",
           "when": "view == managerAssistantExplorer && viewItem == artifact",
@@ -141,6 +176,11 @@
         {
           "command": "manager-assistant.removeArtifact",
           "when": "view == managerAssistantExplorer && viewItem == artifact",
+          "group": "inline"
+        },
+        {
+          "command": "manager-assistant.loadCommitArtifacts",
+          "when": "view == managerAssistantHistory && viewItem == report",
           "group": "inline"
         }
       ],
@@ -185,15 +225,25 @@
           "type": "number",
           "default": 10,
           "description": "Número máximo de relatórios a manter no histórico"
+        },
+        "managerAssistant.defaultAuthor": {
+          "type": "string",
+          "default": "",
+          "description": "Identificação padrão do autor (ex: c1234567)"
+        },
+        "managerAssistant.defaultTaskFormat": {
+          "type": "string",
+          "default": "T-\\d+",
+          "description": "Formato padrão para reconhecimento de tarefas nas mensagens de commit (regex)"
         }
       }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "node build.js",
-    "watch": "tsc -watch -p ./",
-    "package": "node build.js",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js"
   },
@@ -208,5 +258,8 @@
     "eslint": "^8.43.0",
     "mocha": "^10.2.0",
     "typescript": "^5.1.3"
+  },
+  "dependencies": {
+    "simple-git": "^3.20.0"
   }
 }
